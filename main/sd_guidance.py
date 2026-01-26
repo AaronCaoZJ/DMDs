@@ -176,6 +176,7 @@ class SDGuidance(nn.Module):
         original_latents = latents 
         batch_size = latents.shape[0]
         with torch.no_grad():
+            # 重加噪
             timesteps = torch.randint(
                 self.min_step, 
                 min(self.max_step+1, self.num_train_timesteps),
@@ -183,9 +184,7 @@ class SDGuidance(nn.Module):
                 device=latents.device,
                 dtype=torch.long
             )
-
             noise = torch.randn_like(latents)
-
             noisy_latents = self.scheduler.add_noise(latents, noise, timesteps)
 
             # run at full precision as autocast and no_grad doesn't work well together 
@@ -235,6 +234,7 @@ class SDGuidance(nn.Module):
             p_real = (latents - pred_real_image)
             p_fake = (latents - pred_fake_image)
 
+            # [B, C, H, W], normalize by mean of all pixels' absolute value
             grad = (p_real - p_fake) / torch.abs(p_real).mean(dim=[1, 2, 3], keepdim=True) 
             grad = torch.nan_to_num(grad)
 
