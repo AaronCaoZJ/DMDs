@@ -3,6 +3,7 @@ from diffusers import UNet2DConditionModel, AutoencoderKL, AutoencoderTiny
 from main.utils import get_x0_from_noise, NoOpContext
 from main.sdxl.sdxl_text_encoder import SDXLTextEncoder
 from main.sd_guidance import SDGuidance
+from main.decoupled_guidance import SDDecoupledGuidance
 from transformers import CLIPTextModel
 from accelerate.utils import broadcast
 from peft import LoraConfig
@@ -15,7 +16,11 @@ class SDUniModel(nn.Module):
 
         self.args = args
         self.accelerator = accelerator
-        self.guidance_model = SDGuidance(args, accelerator) 
+        # 根据配置选择使用哪个 guidance model
+        if getattr(args, 'use_decoupled_dmd', False):
+            self.guidance_model = SDDecoupledGuidance(args, accelerator)
+        else:
+            self.guidance_model = SDGuidance(args, accelerator)
         self.num_train_timesteps = self.guidance_model.num_train_timesteps
         self.num_visuals = args.grid_size * args.grid_size
         self.conditioning_timestep = args.conditioning_timestep 
@@ -72,6 +77,11 @@ class SDUniModel(nn.Module):
 
             if self.gradient_checkpointing:
                 self.feedforward_model.enable_gradient_checkpointing()
+            
+            # Convert to bfloat16 for FSDP + mixed precision
+            if args.use_fp16 and getattr(args, 'fsdp', False):
+                self.feedforward_model.to(torch.bfloat16)
+                self.guidance_model.to(torch.bfloat16)
         else:
             raise NotImplementedError()
 
@@ -121,7 +131,8 @@ class SDUniModel(nn.Module):
 
     def decode_image(self, latents):
         latents = 1 / self.vae.config.scaling_factor * latents
-        image = self.vae.decode(latents).sample.float()
+        with torch.no_grad():
+            image = self.vae.decode(latents).sample.float()
         return image 
 
     @torch.no_grad()
@@ -136,7 +147,7 @@ class SDUniModel(nn.Module):
 
         # we choose a random step and share it across all gpu
         selected_step = torch.randint(low=0, high=self.num_denoising_step, size=(1,), device=device, dtype=torch.long)
-        selected_step = broadcast(selected_step, from_process=0)
+        selected_step = broadcast(selected_step, from_process=0)  # broadcast to all gpus
 
         # set a default value in case we don't enter the loop 
         # it will be overwriten in the pure_noise_mask check later 
@@ -163,25 +174,43 @@ class SDUniModel(nn.Module):
 
     @torch.no_grad()
     def prepare_denoising_data(self, denoising_dict, real_train_dict, noise):
-        assert self.sdxl, "Denoising is only supported for SDXL"
+        # assert self.sdxl, "Denoising is only supported for SDXL"
 
         indices = torch.randint(
             0, self.num_denoising_step, (noise.shape[0],), device=noise.device, dtype=torch.long
         )
         timesteps = self.denoising_step_list.to(noise.device)[indices]
 
-        text_embedding, pooled_text_embedding = self.text_encoder(denoising_dict)
+        # text_embedding, pooled_text_embedding = self.text_encoder(denoising_dict)
+        
+        with torch.no_grad():
+            if self.sdxl:
+                text_embedding, pooled_text_embedding = self.text_encoder(denoising_dict)
+            else:
+                text_embedding_dict = self.text_encoder(denoising_dict["text_input_ids_one"].squeeze(1))
+                text_embedding = text_embedding_dict["last_hidden_state"]
+                pooled_text_embedding = text_embedding_dict["pooler_output"]
+            
 
         if real_train_dict is not None:
-            real_text_embedding, real_pooled_text_embedding = self.text_encoder(real_train_dict)
+            with torch.no_grad():
+                if self.sdxl:
+                    real_text_embedding, real_pooled_text_embedding = self.text_encoder(real_train_dict)
+                    real_unet_added_conditions = {
+                        "time_ids": self.add_time_ids.repeat(len(real_text_embedding), 1),
+                        "text_embeds": real_pooled_text_embedding
+                    }
+                else:
+                     # SD1.5 adaptation
+                    real_text_embedding_dict = self.text_encoder(real_train_dict["text_input_ids_one"].squeeze(1))
+                    real_text_embedding = real_text_embedding_dict["last_hidden_state"].float()
+                    real_pooled_text_embedding = real_text_embedding_dict["pooler_output"].float()
+                    real_unet_added_conditions = None
 
             real_train_dict['text_embedding'] = real_text_embedding
 
-            real_unet_added_conditions = {
-                "time_ids": self.add_time_ids.repeat(len(real_text_embedding), 1),
-                "text_embeds": real_pooled_text_embedding
-            }
-            real_train_dict['unet_added_conditions'] = real_unet_added_conditions
+            if real_unet_added_conditions is not None:
+                real_train_dict['unet_added_conditions'] = real_unet_added_conditions
 
         if self.backward_simulation:
             # we overwrite the denoising timesteps 
@@ -204,24 +233,25 @@ class SDUniModel(nn.Module):
     def prepare_pure_generation_data(self, text_embedding, real_train_dict, noise):
 
         # actually it is a tokenized prompt 
-        text_embedding_output = self.text_encoder(text_embedding) 
+        with torch.no_grad():
+            text_embedding_output = self.text_encoder(text_embedding) 
 
-        text_embedding = text_embedding_output[0].float()
-        pooled_text_embedding = text_embedding_output[1].float()
+            text_embedding = text_embedding_output[0].float()
+            pooled_text_embedding = text_embedding_output[1].float()
 
-        if real_train_dict is not None:
-            if self.sdxl:
-                real_text_embedding, real_pooled_text_embedding = self.text_encoder(real_train_dict)
-                real_train_dict['text_embedding'] = real_text_embedding
-                real_unet_added_conditions = {
-                    "time_ids": self.add_time_ids.repeat(len(real_train_dict['text_embedding'] ), 1),
-                    "text_embeds": real_pooled_text_embedding
-                }
-                real_train_dict['unet_added_conditions'] = real_unet_added_conditions
-            else:
-                real_text_embedding_output = self.text_encoder(real_train_dict["text_input_ids_one"].squeeze(1)) 
-                real_train_dict["text_embedding"] = real_text_embedding_output[0].float()
-                real_train_dict['unet_added_conditions'] = None 
+            if real_train_dict is not None:
+                if self.sdxl:
+                    real_text_embedding, real_pooled_text_embedding = self.text_encoder(real_train_dict)
+                    real_train_dict['text_embedding'] = real_text_embedding
+                    real_unet_added_conditions = {
+                        "time_ids": self.add_time_ids.repeat(len(real_train_dict['text_embedding'] ), 1),
+                        "text_embeds": real_pooled_text_embedding
+                    }
+                    real_train_dict['unet_added_conditions'] = real_unet_added_conditions
+                else:
+                    real_text_embedding_output = self.text_encoder(real_train_dict["text_input_ids_one"].squeeze(1)) 
+                    real_train_dict["text_embedding"] = real_text_embedding_output[0].float()
+                    real_train_dict['unet_added_conditions'] = None 
 
         noisy_image = noise 
         return text_embedding, pooled_text_embedding, real_train_dict, noisy_image
@@ -297,17 +327,17 @@ class SDUniModel(nn.Module):
                     "uncond_embedding": uncond_embedding,
                     "real_train_dict": real_train_dict,
                     "unet_added_conditions": unet_added_conditions,
-                    "uncond_unet_added_conditions": uncond_unet_added_conditions
+                    "uncond_unet_added_conditions": uncond_unet_added_conditions,
+                    "timesteps": timesteps  # backward simulation 返回的 t，用来确定 CA 阶段的 noise level 下界
                 } 
 
-                # avoid any side effects of gradient accumulation
-                self.guidance_model.requires_grad_(False)
+                # Guidance model computes loss for generator update
+                # FSDP note: Let gradients flow naturally; optimizer only updates its own parameters
                 loss_dict, log_dict = self.guidance_model(
                     generator_turn=True,
                     guidance_turn=False,
                     generator_data_dict=generator_data_dict
                 )
-                self.guidance_model.requires_grad_(True)
             else:
                 loss_dict = {}
                 log_dict = {} 

@@ -31,11 +31,10 @@ class Trainer:
         accelerator_project_config = ProjectConfiguration(logging_dir=args.log_path)
         accelerator = Accelerator(
             gradient_accumulation_steps=args.gradient_accumulation_steps,
-            mixed_precision="no",
+            mixed_precision="bf16" if args.use_fp16 else "no",
             log_with="wandb",
             project_config=accelerator_project_config,
-            kwargs_handlers=None,
-            dispatch_batches=False
+            kwargs_handlers=None
         )
         set_seed(args.seed + accelerator.process_index)
 
@@ -64,7 +63,7 @@ class Trainer:
         self.denoising = args.denoising
         self.step = 0 
 
-        if self.denoising: assert args.sdxl, "denoising only supported for sdxl." 
+        # if self.denoising: assert args.sdxl, "denoising only supported for sdxl." 
 
         if args.ckpt_only_path is not None:
             if accelerator.is_main_process:
@@ -680,7 +679,10 @@ def parse_args():
     parser.add_argument("--lora_rank", type=int, default=64)
     parser.add_argument("--lora_alpha", type=float, default=8)
     parser.add_argument("--lora_dropout", type=float, default=0.0)
-    
+
+    parser.add_argument("--cfg_weight", type=float, default=1.0, help="CFG augmentation weight for Decoupled DMD")
+    parser.add_argument("--use_decoupled_dmd", action="store_true", help="Use Decoupled DMD training")
+
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:

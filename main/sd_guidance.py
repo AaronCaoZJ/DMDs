@@ -6,8 +6,16 @@ import torch.nn as nn
 import torch
 import types 
 
-def predict_noise(unet, noisy_latents, text_embeddings, uncond_embedding, timesteps, 
-    guidance_scale=1.0, unet_added_conditions=None, uncond_unet_added_conditions=None
+def predict_noise(
+    unet, 
+    noisy_latents, 
+    text_embeddings, 
+    uncond_embedding, 
+    timesteps, 
+    guidance_scale=1.0, 
+    unet_added_conditions=None, 
+    uncond_unet_added_conditions=None,
+    decoupled=False # if True, return cond, uncond, combined preds
 ):
     CFG_GUIDANCE = guidance_scale > 1
 
@@ -25,10 +33,14 @@ def predict_noise(unet, noisy_latents, text_embeddings, uncond_embedding, timest
                 )
         else:
             condition_input = None 
+        
+        if decoupled:
+            return noise_pred_text, noise_pred_uncond
 
         noise_pred = unet(model_input, timesteps, embeddings, added_cond_kwargs=condition_input).sample
         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond) 
+        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+
     else:
         model_input = noisy_latents 
         embeddings = text_embeddings
@@ -320,6 +332,8 @@ class SDGuidance(nn.Module):
             text_embedding=text_embedding, 
             unet_added_conditions=unet_added_conditions
         )
+        # 一种激活函数，最小化 -score，即最大化 score
+        # softplus(-x) = log(1 + exp(-x)), which encourages the logits to be large positive values
         loss_dict["gen_cls_loss"] = F.softplus(-pred_realism_on_fake_with_grad).mean()
         return loss_dict 
 

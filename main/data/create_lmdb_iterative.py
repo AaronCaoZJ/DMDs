@@ -31,7 +31,7 @@ def get_array_shape_from_lmdb(lmdb_path, array_name):
     return image_shape 
 
 def load_ode_file(ode_file):
-    ode_dict = torch.load(ode_file)
+    ode_dict = torch.load(ode_file, weights_only=False)
 
     ode_dict.pop('prompt_list', None)  # Remove 'prompt_list' if exists
     ode_dict.pop('batch_index', None)  # Remove 'batch_index' if exists
