@@ -10,7 +10,7 @@ class SDDecoupledGuidance(SDGuidance):
         super().__init__(args, accelerator)
 
         # new attributes for Decoupled DMD
-        self.cfg_weight = getattr(args, 'cfg_weight', 1.0)
+        # self.cfg_weight = getattr(args, 'cfg_weight', 1.0)
         # self.dm_weight = getattr(args, 'dm_weight', 0.5)
 
         # self.new_component = ...
@@ -129,7 +129,8 @@ class SDDecoupledGuidance(SDGuidance):
 
             # 计算更新向量（对应伪代码）
             # CA: 鼓励 generator 学习 CFG 的效果
-            ca_update_vector = self.cfg_weight * (pred_ca_real_cond_image - pred_ca_real_uncond_image)
+            # cfg_eight 即使用 real_guidance_scale
+            ca_update_vector = (self.real_guidance_scale - 1) * (pred_ca_real_cond_image - pred_ca_real_uncond_image)
             ca_norm_factor = (pred_ca_real_cond_image - pred_generator_image).abs().mean(dim=[1,2,3], keepdim=True)
             ca_update_vector = ca_update_vector / (ca_norm_factor + 1e-8)
             

@@ -31,7 +31,7 @@ torchrun --nproc_per_node=2 --nnodes=1 --node_rank=0 \
     --log_path $CHECKPOINT_PATH/logs \
     --batch_size 4 \
     --grid_size 2 \
-    --initialie_generator --log_iters 1000 \
+    --initialize_generator --log_iters 1000 \
     --resolution 512 \
     --latent_resolution 64 \
     --seed 10 \

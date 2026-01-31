@@ -13,7 +13,7 @@ class EDMUniModel(nn.Module):
         self.guidance_min_step = self.guidance_model.min_step
         self.guidance_max_step = self.guidance_model.max_step
 
-        if args.initialie_generator:
+        if args.initialize_generator:
             self.feedforward_model = copy.deepcopy(self.guidance_model.fake_unet)
         else:
             raise NotImplementedError("Only support initializing generator from guidance model.")

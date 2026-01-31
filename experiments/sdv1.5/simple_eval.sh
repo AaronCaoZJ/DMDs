@@ -10,13 +10,10 @@ export HF_HUB_CACHE=/home/zhijun/Code/DMD2/ckpt/hub
 export TRANSFORMERS_CACHE=/home/zhijun/Code/DMD2/ckpt/transformers
 
 # 设置checkpoint路径
-CHECKPOINT_DIR="/data/sdv15/sdv15_decoupled_4step/time_1769772371_seed10"
-# CHECKPOINT_DIR="/data/sdv15/sdv15_decoupled_4step/time_1769762143_seed10"
-# CHECKPOINT_DIR="/data/sdv15/sdv15_decoupled_4step"
-# CHECKPOINT_DIR="/home/zhijun/Code/DMD2/ckpt/hub/models--stable-diffusion-v1-5--stable-diffusion-v1-5/snapshots/451f4fe16113bff5a5d2269ed5ad43b0592e9a14"
+CHECKPOINT_DIR="/data/sdv15/cache/time_1769834924_seed10/checkpoint_model_000500"
 
 # 找到最新的checkpoint
-LATEST_CHECKPOINT=$(ls -t $CHECKPOINT_DIR/*checkpoint_model_*/pytorch_model.bin 2>/dev/null | head -1)
+LATEST_CHECKPOINT=$(ls -t $CHECKPOINT_DIR/pytorch_model.bin 2>/dev/null | head -1)
 
 if [ -z "$LATEST_CHECKPOINT" ]; then
     echo "No checkpoint found in $CHECKPOINT_DIR"
@@ -28,7 +25,7 @@ echo "Using checkpoint: $LATEST_CHECKPOINT"
 # 运行推理
 python main/simple_inference.py \
     --checkpoint "$LATEST_CHECKPOINT" \
-    --output_dir "/data/sdv15/test_output/decoupled_dmd_1000" \
+    --output_dir "/data/sdv15/test_output/0131/decoupled_dmd_500" \
     --seed 42 \
     --device cuda \
     --prompts \

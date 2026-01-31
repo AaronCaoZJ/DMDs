@@ -23,7 +23,7 @@ accelerate launch --config_file fsdp_configs/fsdp_1node_2x5090_mix.yaml main/tra
     --log_path $CHECKPOINT_PATH/logs \
     --batch_size 4 \
     --grid_size 2 \
-    --initialie_generator --log_iters 500 \
+    --initialize_generator --log_iters 500 \
     --resolution 512 \
     --latent_resolution 64 \
     --seed 10 \

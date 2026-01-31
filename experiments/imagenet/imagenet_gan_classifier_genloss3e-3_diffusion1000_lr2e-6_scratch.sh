@@ -8,7 +8,7 @@ CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7 torchrun --nproc_per_node 7 --nnodes 1 main/e
     --train_iters 10000000 \
     --output_path $CHECKPOINT_PATH/imagenet_gan_classifier_genloss3e-3_diffusion1000_lr2e-6_scratch \
     --batch_size 40 \
-    --initialie_generator --log_iters 500 \
+    --initialize_generator --log_iters 500 \
     --resolution 64 \
     --label_dim 1000 \
     --dataset_name "imagenet" \

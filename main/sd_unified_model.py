@@ -40,7 +40,7 @@ class SDUniModel(nn.Module):
         )
         self.timestep_interval = self.denoising_timestep//self.num_denoising_step
 
-        if args.initialie_generator:
+        if args.initialize_generator:
             self.feedforward_model = UNet2DConditionModel.from_pretrained(
                 args.model_id,
                 subfolder="unet"

@@ -12,7 +12,7 @@ accelerate launch --config_file $FSDP_DIR/config_rank$RANK.yaml main/train_sd.py
     --output_path  $CHECKPOINT_PATH/sdxl_cond999_8node_lr5e-7_denoising4step_diffusion1000_gan5e-3_guidance8_noinit_noode_backsim_scratch  \
     --batch_size 2 \
     --grid_size 2 \
-    --initialie_generator --log_iters 1000 \
+    --initialize_generator --log_iters 1000 \
     --resolution 1024 \
     --latent_resolution 128 \
     --seed 10 \
@@ -41,6 +41,5 @@ accelerate launch --config_file $FSDP_DIR/config_rank$RANK.yaml main/train_sd.py
     --denoising_timestep 1000 \
     --backward_simulation \
     --use_decoupled_dmd \
-    --cfg_weight 1.0 \
     --train_prompt_path $CHECKPOINT_PATH/captions_laion_score6.25.pkl \
     --real_image_path $CHECKPOINT_PATH/sdxl_vae_latents_laion_500k_lmdb/ 

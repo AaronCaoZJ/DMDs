@@ -458,7 +458,7 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--resolution", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-5)
-    parser.add_argument("--initialie_generator", action="store_true")
+    parser.add_argument("--initialize_generator", action="store_true")
     parser.add_argument("--checkpoint_path", type=str, default=None)
     parser.add_argument("--local_rank", type=int, default=-1, help="For distributed training: local_rank")
     parser.add_argument("--wandb_entity", type=str)

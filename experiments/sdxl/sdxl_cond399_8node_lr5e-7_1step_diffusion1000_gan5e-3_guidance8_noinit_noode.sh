@@ -12,7 +12,7 @@ accelerate launch --config_file $FSDP_DIR/config_rank$RANK.yaml main/train_sd.py
     --output_path  $CHECKPOINT_PATH/sdxl_cond399_8node_lr5e-7_1step_diffusion1000_gan5e-3_guidance8_noinit_noode  \
     --batch_size 2 \
     --grid_size 2 \
-    --initialie_generator --log_iters 1000 \
+    --initialize_generator --log_iters 1000 \
     --resolution 1024 \
     --latent_resolution 128 \
     --seed 10 \

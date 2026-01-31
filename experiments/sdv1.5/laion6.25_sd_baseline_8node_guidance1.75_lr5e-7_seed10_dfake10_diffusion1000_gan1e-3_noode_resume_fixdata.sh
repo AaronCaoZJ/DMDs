@@ -12,7 +12,7 @@ torchrun --nnodes 8 --nproc_per_node=8 --rdzv_id=2345 \
     --output_path $CHECKPOINT_PATH/laion6.25_sd_baseline_8node_guidance1.75_lr5e-7_seed10_dfake10_diffusion1000_gan1e-3_resume \
     --batch_size 32 \
     --grid_size 2 \
-    --initialie_generator --log_iters 1000 \
+    --initialize_generator --log_iters 1000 \
     --resolution 512 \
     --latent_resolution 64 \
     --seed 10 \
