@@ -8,7 +8,6 @@ from diffusers.optimization import get_scheduler
 from main.utils import SDTextDataset, cycle 
 from main.sd_unified_model import SDUniModel
 from accelerate.utils import set_seed
-import gc
 from accelerate import Accelerator
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
@@ -74,7 +73,17 @@ class Trainer:
             print(self.model.feedforward_model.load_state_dict(torch.load(generator_path, map_location="cpu"), strict=False))
             print(self.model.guidance_model.load_state_dict(torch.load(guidance_path, map_location="cpu"), strict=False))
 
-            self.step = int(args.ckpt_only_path.replace("/", "").split("_")[-1])
+            # Extract step from checkpoint path or reset to 0
+            if args.reset_step:
+                self.step = 0
+                print("Reset step to 0 (new training phase)")
+            else:
+                try:
+                    self.step = int(args.ckpt_only_path.replace("/", "").split("_")[-1])
+                    print(f"Continue from step {self.step}")
+                except:
+                    self.step = 0
+                    print("Warning: Cannot extract step from checkpoint path, starting from step 0")
 
         if args.generator_ckpt_path is not None:
             if accelerator.is_main_process:
@@ -260,10 +269,7 @@ class Trainer:
             model, StateDictType.FULL_STATE_DICT, fsdp_fullstate_save_policy
         ):
             checkpoint = model.state_dict()
-        
-        # Explicitly trigger garbage collection to free memory
-        gc.collect()
-        torch.cuda.empty_cache()
+
         return checkpoint 
 
     def load(self, checkpoint_path):
@@ -280,23 +286,20 @@ class Trainer:
         # If FSDP is used, we only save the model parameter as I haven't figured out how to save the optimizer state without oom yet, help is appreciated.
         # Otherwise, we use the default accelerate save_state function 
         
+        if self.fsdp:
+            feedforward_state_dict = self.fsdp_state_dict(self.model.feedforward_model)
+            guidance_model_state_dict = self.fsdp_state_dict(self.model.guidance_model)
+
         if self.accelerator.is_main_process:
             output_path = os.path.join(self.output_path, f"checkpoint_model_{self.step:06d}")
             os.makedirs(output_path, exist_ok=True)
             print(f"start saving checkpoint to {output_path}")
 
             if self.fsdp: 
-                feedforward_state_dict = self.fsdp_state_dict(self.model.feedforward_model)
                 torch.save(feedforward_state_dict, os.path.join(output_path, f"pytorch_model.bin"))
                 del feedforward_state_dict
-                gc.collect()
-                torch.cuda.empty_cache()
-                
-                guidance_model_state_dict = self.fsdp_state_dict(self.model.guidance_model)
                 torch.save(guidance_model_state_dict, os.path.join(output_path, f"pytorch_model_1.bin"))
                 del guidance_model_state_dict
-                gc.collect()
-                torch.cuda.empty_cache()
             else:
                 self.accelerator.save_state(output_path) 
 
@@ -323,9 +326,6 @@ class Trainer:
                 for folder in checkpoints[:-self.max_checkpoint]:
                     shutil.rmtree(os.path.join(self.cache_dir, folder))
             print("done saving")
-        
-        # Wait for main process to finish saving before all processes continue
-        self.accelerator.wait_for_everyone()
         torch.cuda.empty_cache()
 
     def train_one_step(self):
@@ -732,6 +732,7 @@ def parse_args():
     parser.add_argument("--use_fp16", action="store_true")
     parser.add_argument("--num_train_timesteps", type=int, default=1000)
     parser.add_argument("--ckpt_only_path", type=str, default=None, help="checkpoint (no optimizer state) only path")
+    parser.add_argument("--reset_step", action="store_true", help="reset step to 0 when loading from ckpt_only_path (for new training phase)")
     parser.add_argument("--train_prompt_path", type=str)
     parser.add_argument("--latent_resolution", type=int, default=64)
     parser.add_argument("--real_guidance_scale", type=float, default=6.0)

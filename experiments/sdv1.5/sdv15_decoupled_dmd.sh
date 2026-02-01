@@ -15,7 +15,7 @@ export HF_HUB_CACHE=/home/zhijun/Code/DMD2/ckpt/hub
 export TRANSFORMERS_CACHE=/home/zhijun/Code/DMD2/ckpt/transformers
 
 accelerate launch --config_file fsdp_configs/fsdp_1node_2x5090_mix.yaml main/train_sd.py \
-    --generator_lr 5e-6  \
+    --generator_lr 1e-5  \
     --guidance_lr 5e-6 \
     --train_iters 100000000 \
     --output_path  $CHECKPOINT_PATH/sdv15_decoupled_dmd \
@@ -27,7 +27,7 @@ accelerate launch --config_file fsdp_configs/fsdp_1node_2x5090_mix.yaml main/tra
     --resolution 512 \
     --latent_resolution 64 \
     --seed 10 \
-    --real_guidance_scale 3.0 \
+    --real_guidance_scale 1.75 \
     --fake_guidance_scale 1.0 \
     --max_grad_norm 10.0 \
     --model_id "stable-diffusion-v1-5/stable-diffusion-v1-5" \
@@ -35,7 +35,7 @@ accelerate launch --config_file fsdp_configs/fsdp_1node_2x5090_mix.yaml main/tra
     --real_image_path $CHECKPOINT_PATH/sd_vae_latents_laion_500k_lmdb \
     --wandb_iters 50 \
     --wandb_entity $WANDB_ENTITY \
-    --wandb_name "sdv15_ddmd_4step_5-6gid_5-6gen_3.0realgid"  \
+    --wandb_name "sdv15_ddmd_4step_5-6gid_5-6gen_1.75realgid"  \
     --wandb_project $WANDB_PROJECT \
     --use_fp16 \
     --log_loss \
