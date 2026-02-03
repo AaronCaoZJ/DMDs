@@ -515,6 +515,12 @@ class Trainer:
                         # 普通模式
                         wandb_loss_dict["loss_dm"] = loss_dict['loss_dm'].item()
                         wandb_loss_dict["dmtrain_gradient_norm"] = log_dict['dmtrain_gradient_norm']
+                        
+                        # f-散度相关指标
+                        if 'f_div_weight_mean' in loss_dict:
+                            wandb_loss_dict["f_div_weight_mean"] = loss_dict['f_div_weight_mean']
+                        if 'f_div_weight_std' in loss_dict:
+                            wandb_loss_dict["f_div_weight_std"] = loss_dict['f_div_weight_std']
 
                 if self.gen_cls_loss:
                     wandb_loss_dict.update({
@@ -777,8 +783,14 @@ def parse_args():
     parser.add_argument("--lora_alpha", type=float, default=8)
     parser.add_argument("--lora_dropout", type=float, default=0.0)
 
-    # parser.add_argument("--cfg_weight", type=float, default=1.0, help="CFG augmentation weight for Decoupled DMD")
+    # Decoupled DMD 参数
+    parser.add_argument("--cfg_weight", type=float, default=1.0, help="CFG augmentation weight for Decoupled DMD")
     parser.add_argument("--use_decoupled_dmd", action="store_true", help="Use Decoupled DMD training")
+    
+    # f-散度参数
+    parser.add_argument("--use_f_divergence", action="store_true", help="Use f-divergence weighting for distribution matching")
+    parser.add_argument("--divergence_type", type=str, default="JS", choices=["JS", "forward-KL", "reverse-KL"], 
+                        help="Type of f-divergence: JS (Jensen-Shannon), forward-KL, or reverse-KL")
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))

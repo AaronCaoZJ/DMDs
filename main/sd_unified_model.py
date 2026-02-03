@@ -214,9 +214,7 @@ class SDUniModel(nn.Module):
                     real_unet_added_conditions = None
 
             real_train_dict['text_embedding'] = real_text_embedding
-
-            if real_unet_added_conditions is not None:
-                real_train_dict['unet_added_conditions'] = real_unet_added_conditions
+            real_train_dict['unet_added_conditions'] = real_unet_added_conditions
 
         if self.backward_simulation:
             # we overwrite the denoising timesteps 

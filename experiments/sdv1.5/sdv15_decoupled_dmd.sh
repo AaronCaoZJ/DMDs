@@ -16,7 +16,7 @@ export TRANSFORMERS_CACHE=/home/zhijun/Code/DMD2/ckpt/transformers
 
 accelerate launch --config_file fsdp_configs/fsdp_1node_2x5090_mix.yaml main/train_sd.py \
     --generator_lr 1e-5  \
-    --guidance_lr 5e-6 \
+    --guidance_lr 1e-5 \
     --train_iters 100000000 \
     --output_path  $CHECKPOINT_PATH/sdv15_decoupled_dmd \
     --cache_dir $CHECKPOINT_PATH/cache \
@@ -35,11 +35,11 @@ accelerate launch --config_file fsdp_configs/fsdp_1node_2x5090_mix.yaml main/tra
     --real_image_path $CHECKPOINT_PATH/sd_vae_latents_laion_500k_lmdb \
     --wandb_iters 50 \
     --wandb_entity $WANDB_ENTITY \
-    --wandb_name "sdv15_ddmd_4step_5-6gid_5-6gen_1.75realgid"  \
+    --wandb_name "sdv15_ddmd_4step_1-5gid_1-5gen_1.75realgid"  \
     --wandb_project $WANDB_PROJECT \
     --use_fp16 \
     --log_loss \
-    --dfake_gen_update_ratio 10 \
+    --dfake_gen_update_ratio 5 \
     --fsdp \
     --denoising \
     --num_denoising_step 4 \

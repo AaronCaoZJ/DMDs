@@ -40,6 +40,18 @@ accelerate launch --config_file fsdp_configs/fsdp_1node_2x5090_mix.yaml main/tra
     --use_fp16 \
     --log_loss \
     --dfake_gen_update_ratio 5 \
-    --fsdp 
+    --fsdp \
+    --cls_on_clean_image \
+    --gen_cls_loss \
+    --gen_cls_loss_weight 5e-3 \
+    --guidance_cls_loss_weight 1e-2 \
+    --diffusion_gan \
+    --diffusion_gan_max_timestep 1000 \
+    --denoising \
+    --num_denoising_step 4 \
+    --denoising_timestep 1000 \
+    --backward_simulation \
+    --use_f_divergence \
+    --divergence_type "JS" \
 
 

@@ -106,6 +106,10 @@ class SDGuidance(nn.Module):
 
         self.cls_on_clean_image = args.cls_on_clean_image 
         self.gen_cls_loss = args.gen_cls_loss 
+        
+        # f-散度相关参数
+        self.use_f_divergence = getattr(args, 'use_f_divergence', False)
+        self.divergence_type = getattr(args, 'divergence_type', 'JS')  # JS, forward-KL, reverse-KL
 
         self.accelerator = accelerator
 
@@ -176,7 +180,56 @@ class SDGuidance(nn.Module):
         rep = rep[-1].float()
         logits = self.cls_pred_branch(rep).squeeze(dim=[2, 3])
         return logits
+    
+    def compute_f_divergence_weight(
+        self, 
+        latents, 
+        text_embedding, 
+        unet_added_conditions, 
+        batch_size,
+        divergence_type="JS"
+    ):
+        """
+        f-散度权重
+        Args:
+            batch_size: 批次大小
+            timesteps: 时间步 [B]，用于时间片段归一化
+            divergence_type: 散度类型 ("JS", "forward-KL", "reverse-KL")
+        Returns:
+            h_weight: 权重系数 [B, 1, 1, 1]
+        """
+        # 计算判别器 logits
+        logits = self.compute_cls_logits(
+            latents, 
+            text_embedding, 
+            unet_added_conditions
+        )
 
+        # 计算密度比 r = p_real(x) / p_fake(x) = exp(logits)
+        ratio_r = torch.exp(logits.clamp(-10, 10))  # [B, 1]
+        
+        if divergence_type == "JS":
+            # Jensen-Shannon: h(r) = r / (r + 1)
+            ratio_r = torch.sigmoid(logits)
+        elif divergence_type == "forward-KL":
+            # Forward KL: h(r) = r
+            h_weight = ratio_r
+        elif divergence_type == "reverse-KL":
+            # Reverse KL (DMD2 原版): h(r) = 1
+            h_weight = torch.ones_like(ratio_r)
+        else:
+            raise ValueError(f"Unknown divergence_type: {divergence_type}")
+        
+        # TODO: 时间片段归一化
+        
+        # 第二阶段：全局批次归一化
+        global_mean = h_weight.mean()
+        h_weight = h_weight / (global_mean + 1e-8)
+        
+        # 广播到 [B, C, H, W]
+        h_weight = h_weight.view(batch_size, 1, 1, 1)
+        
+        return h_weight
 
     def compute_distribution_matching_loss(
         self, 
@@ -188,82 +241,117 @@ class SDGuidance(nn.Module):
     ):
         original_latents = latents 
         batch_size = latents.shape[0]
-        with torch.no_grad():
-            # 重加噪
-            timesteps = torch.randint(
-                self.min_step, 
-                min(self.max_step+1, self.num_train_timesteps),
-                [batch_size], 
-                device=latents.device,
-                dtype=torch.long
-            )
-            noise = torch.randn_like(latents)
-            noisy_latents = self.scheduler.add_noise(latents, noise, timesteps)
 
-            # run at full precision as autocast and no_grad doesn't work well together 
-            pred_fake_noise = predict_noise(
-                self.fake_unet, noisy_latents, text_embedding, uncond_embedding, 
-                timesteps, guidance_scale=self.fake_guidance_scale,
+        timesteps = torch.randint(
+            self.min_step, 
+            min(self.max_step+1, self.num_train_timesteps),
+            [batch_size], 
+            device=latents.device,
+            dtype=torch.long
+        )
+        # 重新加噪
+        noise = torch.randn_like(latents)
+        noisy_latents = self.scheduler.add_noise(latents, noise, timesteps)
+        
+        # 3. fake
+        pred_fake_noise = predict_noise(
+            self.fake_unet, noisy_latents, text_embedding, uncond_embedding,
+            timesteps, guidance_scale=self.fake_guidance_scale,
+            unet_added_conditions=unet_added_conditions,
+            uncond_unet_added_conditions=uncond_unet_added_conditions
+        )
+        pred_fake_image = get_x0_from_noise(
+            noisy_latents.double(), pred_fake_noise.double(), 
+            self.alphas_cumprod.double(), timesteps
+        )
+        
+        # 4. real
+        if self.use_fp16:
+            if self.sdxl:
+                bf16_unet_added_conditions = {
+                    k: v.to(torch.bfloat16) for k, v in unet_added_conditions.items()
+                }
+                bf16_uncond_unet_added_conditions = {
+                    k: v.to(torch.bfloat16) for k, v in uncond_unet_added_conditions.items()
+                }
+            else:
+                bf16_unet_added_conditions = unet_added_conditions
+                bf16_uncond_unet_added_conditions = uncond_unet_added_conditions
+            
+            pred_real_noise = predict_noise(
+                self.real_unet, noisy_latents.to(torch.bfloat16),
+                text_embedding.to(torch.bfloat16), uncond_embedding.to(torch.bfloat16),
+                timesteps, guidance_scale=self.real_guidance_scale,
+                unet_added_conditions=bf16_unet_added_conditions,
+                uncond_unet_added_conditions=bf16_uncond_unet_added_conditions
+            )
+        else:
+            pred_real_noise = predict_noise(
+                self.real_unet, noisy_latents, text_embedding, uncond_embedding,
+                timesteps, guidance_scale=self.real_guidance_scale,
                 unet_added_conditions=unet_added_conditions,
                 uncond_unet_added_conditions=uncond_unet_added_conditions
-            )  
-
-            pred_fake_image = get_x0_from_noise(
-                noisy_latents.double(), pred_fake_noise.double(), self.alphas_cumprod.double(), timesteps
             )
+        
+        pred_real_image = get_x0_from_noise(
+            noisy_latents.double(), pred_real_noise.double(),
+            self.alphas_cumprod.double(), timesteps
+        )
+        
+        p_real = (latents - pred_real_image)
+        p_fake = (latents - pred_fake_image)
 
-            if self.use_fp16:
-                if self.sdxl:
-                    bf16_unet_added_conditions = {} 
-                    bf16_uncond_unet_added_conditions = {} 
+        # [B, C, H, W], normalize by mean of all pixels' absolute value
+        grad = (p_real - p_fake) / torch.abs(p_real).mean(dim=[1, 2, 3], keepdim=True) 
+        grad = torch.nan_to_num(grad)
+        
+        if self.use_f_divergence and self.cls_on_clean_image:
+            with torch.no_grad():
+                h_weight = self.compute_f_divergence_weight(
+                    latents, text_embedding, unet_added_conditions,
+                    batch_size, divergence_type=self.divergence_type
+                )   
+                weighted_grad = h_weight * grad
+            
+            loss = 0.5 * F.mse_loss(
+                original_latents.float(), 
+                (original_latents - weighted_grad).detach().float(), 
+                reduction="mean"
+            )
+            
+            # 8. 记录统计信息
+            loss_dict = {
+                "loss_dm": loss,
+                "f_div_weight_mean": h_weight.mean().item(),
+                "f_div_weight_std": h_weight.std().item()
+            }
+            
+            dm_log_dict = {
+                "dmtrain_noisy_latents": noisy_latents.detach().float(),
+                "dmtrain_pred_real_image": pred_real_image.detach().float(),
+                "dmtrain_pred_fake_image": pred_fake_image.detach().float(),
+                "dmtrain_grad": grad.detach().float(),
+                "dmtrain_gradient_norm": torch.norm(grad).item()
+            }
 
-                    for k,v in unet_added_conditions.items():
-                        bf16_unet_added_conditions[k] = v.to(torch.bfloat16)
-                    for k,v in uncond_unet_added_conditions.items():
-                        bf16_uncond_unet_added_conditions[k] = v.to(torch.bfloat16)
-                else:
-                    bf16_unet_added_conditions = unet_added_conditions 
-                    bf16_uncond_unet_added_conditions = uncond_unet_added_conditions
+        else:
+            loss = 0.5 * F.mse_loss(
+                original_latents.float(), 
+                (original_latents-grad).detach().float(), 
+                reduction="mean"
+            )         
 
-                pred_real_noise = predict_noise(
-                    self.real_unet, noisy_latents.to(torch.bfloat16), text_embedding.to(torch.bfloat16), 
-                    uncond_embedding.to(torch.bfloat16), 
-                    timesteps, guidance_scale=self.real_guidance_scale,
-                    unet_added_conditions=bf16_unet_added_conditions,
-                    uncond_unet_added_conditions=bf16_uncond_unet_added_conditions
-                ) 
-            else:
-                pred_real_noise = predict_noise(
-                    self.real_unet, noisy_latents, text_embedding, uncond_embedding, 
-                    timesteps, guidance_scale=self.real_guidance_scale,
-                    unet_added_conditions=unet_added_conditions,
-                    uncond_unet_added_conditions=uncond_unet_added_conditions
-                )
+            loss_dict = {
+                "loss_dm": loss 
+            }
 
-            pred_real_image = get_x0_from_noise(
-                noisy_latents.double(), pred_real_noise.double(), self.alphas_cumprod.double(), timesteps
-            )     
-
-            p_real = (latents - pred_real_image)
-            p_fake = (latents - pred_fake_image)
-
-            # [B, C, H, W], normalize by mean of all pixels' absolute value
-            grad = (p_real - p_fake) / torch.abs(p_real).mean(dim=[1, 2, 3], keepdim=True) 
-            grad = torch.nan_to_num(grad)
-
-        loss = 0.5 * F.mse_loss(original_latents.float(), (original_latents-grad).detach().float(), reduction="mean")         
-
-        loss_dict = {
-            "loss_dm": loss 
-        }
-
-        dm_log_dict = {
-            "dmtrain_noisy_latents": noisy_latents.detach().float(),
-            "dmtrain_pred_real_image": pred_real_image.detach().float(),
-            "dmtrain_pred_fake_image": pred_fake_image.detach().float(),
-            "dmtrain_grad": grad.detach().float(),
-            "dmtrain_gradient_norm": torch.norm(grad).item()
-        }
+            dm_log_dict = {
+                "dmtrain_noisy_latents": noisy_latents.detach().float(),
+                "dmtrain_pred_real_image": pred_real_image.detach().float(),
+                "dmtrain_pred_fake_image": pred_fake_image.detach().float(),
+                "dmtrain_grad": grad.detach().float(),
+                "dmtrain_gradient_norm": torch.norm(grad).item()
+            }
 
         return loss_dict, dm_log_dict
 
