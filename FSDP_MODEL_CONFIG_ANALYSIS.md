@@ -320,6 +320,14 @@ if self.fsdp:
         torch.save(guidance_model_state_dict, guidance_path)
 ```
 
+**Accelerator在这里是分布式训练的"中央协调者"和"抽象层"。它承担三大核心职责：**
+
+1. 分布式策略管理 - 通过FSDP配置文件自动选择ZeRO-3分片策略，将UNet和Guidance两个大模型的参数、梯度、优化器状态分片到8张GPU上，使单卡无法训练的模型成为可能。
+
+2. 训练流程自动化 - 用prepare()包装模型、优化器、数据加载器后，自动处理分布式采样、梯度同步、参数收集/释放等底层细节；用backward()替代原生反向传播，自动管理梯度累积和混合精度；用gather()收集多卡指标用于日志记录。
+
+3. 进程协调控制 - 通过is_main_process确保文件IO、WandB日志、checkpoint保存只执行一次；通过wait_for_everyone()在关键节点（如初始化同步、保存检查点）实现进程同步，避免竞态条件。
+
 ### 3.5 FSDP 参数选择
 
 #### Sharding Strategy（分片策略）
