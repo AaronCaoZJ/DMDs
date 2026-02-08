@@ -1,8 +1,9 @@
 """
 使用原始SD1.5模型进行标准多步采样推理
 用于与蒸馏模型的输出进行对比
+支持多种scheduler，包括LCM用于few-step采样对比
 """
-from diffusers import StableDiffusionPipeline, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler
+from diffusers import StableDiffusionPipeline, DDIMScheduler, DDPMScheduler, EulerDiscreteScheduler, LCMScheduler
 from PIL import Image
 import torch
 import argparse
@@ -36,6 +37,10 @@ def generate_images_teacher(pipeline, prompts, args):
     print(f"Guidance scale: {args.guidance_scale}")
     print(f"Scheduler: {args.scheduler}")
     
+    # 如果使用LCM且设置了固定timesteps，使用之
+    if args.scheduler == "lcm" and args.lcm_timesteps:
+        print(f"LCM固定timesteps: {args.lcm_timesteps}")
+    
     for idx, prompt in enumerate(prompts):
         print(f"Generating image {idx+1}/{len(prompts)}: {prompt}")
         
@@ -43,14 +48,27 @@ def generate_images_teacher(pipeline, prompts, args):
         generator = torch.Generator(device=args.device).manual_seed(args.seed + idx)
         
         # 使用标准pipeline生成图像
-        image = pipeline(
-            prompt=prompt,
-            num_inference_steps=args.num_inference_steps,
-            guidance_scale=args.guidance_scale,
-            generator=generator,
-            height=args.image_resolution,
-            width=args.image_resolution,
-        ).images[0]
+        if args.scheduler == "lcm" and args.lcm_timesteps:
+            # LCM with fixed timesteps (like DMD2)
+            image = pipeline(
+                prompt=prompt,
+                num_inference_steps=args.num_inference_steps,
+                guidance_scale=args.guidance_scale,
+                generator=generator,
+                height=args.image_resolution,
+                width=args.image_resolution,
+                timesteps=args.lcm_timesteps,
+            ).images[0]
+        else:
+            # Standard sampling
+            image = pipeline(
+                prompt=prompt,
+                num_inference_steps=args.num_inference_steps,
+                guidance_scale=args.guidance_scale,
+                generator=generator,
+                height=args.image_resolution,
+                width=args.image_resolution,
+            ).images[0]
         
         all_images.append(image)
     
@@ -82,8 +100,10 @@ def main():
     parser.add_argument("--guidance_scale", type=float, default=7.5,
                         help="Guidance scale for classifier-free guidance")
     parser.add_argument("--scheduler", type=str, default="ddim",
-                        choices=["ddim", "ddpm", "euler"],
-                        help="Scheduler type")
+                        choices=["ddim", "ddpm", "euler", "lcm"],
+                        help="Scheduler type (use 'lcm' only for few-step sampling like 4-8 steps)")
+    parser.add_argument("--lcm_timesteps", type=int, nargs="+", default=None,
+                        help="Fixed timesteps for LCM (e.g., 999 749 499 249). Only used with --scheduler lcm")
     
     args = parser.parse_args()
     
@@ -101,7 +121,16 @@ def main():
     print(f"Inference steps: {args.num_inference_steps}")
     print(f"Guidance scale: {args.guidance_scale}")
     print(f"Scheduler: {args.scheduler}")
+    if args.scheduler == "lcm" and args.lcm_timesteps:
+        print(f"LCM timesteps: {args.lcm_timesteps}")
     print(f"Image resolution: {args.image_resolution}x{args.image_resolution}")
+    print("=" * 80)
+    
+    # 给出配置建议
+    print("\n💡 Configuration Suggestions:")
+    print("  Standard quality (50 steps):   --scheduler ddim --num_inference_steps 50 --guidance_scale 7.5")
+    print("  Fast quality (25 steps):       --scheduler euler --num_inference_steps 25 --guidance_scale 7.5")
+    print("  Few-step comparison (4 steps): --scheduler lcm --num_inference_steps 4 --lcm_timesteps 999 749 499 249 --guidance_scale 0")
     print("=" * 80)
     
     # 加载模型和pipeline
@@ -113,13 +142,37 @@ def main():
         requires_safety_checker=False
     )
     
+    # 验证scheduler和步数的合理性
+    if args.scheduler == "lcm" and args.num_inference_steps > 10:
+        print("\n" + "="*80)
+        print("⚠️  WARNING: LCM scheduler is designed for few-step sampling (4-8 steps)")
+        print(f"   You are using {args.num_inference_steps} steps, which may produce suboptimal results.")
+        print("   Recommendation: Use --scheduler ddim or --scheduler euler for >10 steps")
+        print("="*80 + "\n")
+    
+    if args.scheduler != "lcm" and args.lcm_timesteps:
+        print("\n" + "="*80)
+        print("⚠️  WARNING: --lcm_timesteps is only used with --scheduler lcm")
+        print("   Your timesteps setting will be ignored.")
+        print("="*80 + "\n")
+    
     # 设置scheduler
     if args.scheduler == "ddim":
         pipeline.scheduler = DDIMScheduler.from_config(pipeline.scheduler.config)
+        print("Using DDIM scheduler (good for 20-50 steps)")
     elif args.scheduler == "ddpm":
         pipeline.scheduler = DDPMScheduler.from_config(pipeline.scheduler.config)
+        print("Using DDPM scheduler (good for 50-1000 steps)")
     elif args.scheduler == "euler":
         pipeline.scheduler = EulerDiscreteScheduler.from_config(pipeline.scheduler.config)
+        print("Using Euler scheduler (good for 20-50 steps)")
+    elif args.scheduler == "lcm":
+        pipeline.scheduler = LCMScheduler.from_config(pipeline.scheduler.config)
+        print("Using LCM scheduler (optimized for 4-8 steps)")
+        if args.lcm_timesteps:
+            print(f"  → Fixed timesteps: {args.lcm_timesteps}")
+        else:
+            print(f"  → Auto timesteps for {args.num_inference_steps} steps")
     
     pipeline = pipeline.to(args.device)
     pipeline.set_progress_bar_config(disable=False)

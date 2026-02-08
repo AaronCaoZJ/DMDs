@@ -2,6 +2,7 @@ import matplotlib
 matplotlib.use('Agg')
 from main.utils import prepare_images_for_saving, draw_valued_array, draw_probability_histogram
 from main.sd_image_dataset import SDImageDatasetLMDB
+from main.coco_eval.coco_evaluator import compute_clip_score
 from transformers import CLIPTokenizer, AutoTokenizer
 from accelerate.utils import ProjectConfiguration
 from diffusers.optimization import get_scheduler
@@ -157,7 +158,15 @@ class Trainer:
         self.cls_on_clean_image = args.cls_on_clean_image 
         self.gen_cls_loss = args.gen_cls_loss 
         self.gen_cls_loss_weight = args.gen_cls_loss_weight 
-        self.previous_time = None 
+        self.previous_time = None
+        
+        # CLIP score 相关设置
+        self.compute_clip_score_in_training = getattr(args, 'compute_clip_score_in_training', False)
+        self.clip_score_device = getattr(args, 'clip_score_device', 'cpu')  # 默认放CPU节省显存
+        self.clip_model_name = getattr(args, 'clip_model', 'ViT-B/32')
+        if self.compute_clip_score_in_training and accelerator.is_main_process:
+            print(f"\nCLIP Score enabled: model={self.clip_model_name}, device={self.clip_score_device}")
+            print("CLIP score will be computed during visual steps to monitor generation quality.\n") 
 
         if self.denoising:
             denoising_dataloader = torch.utils.data.DataLoader(
@@ -375,7 +384,13 @@ class Trainer:
 
         if COMPUTE_GENERATOR_GRADIENT:
             if not self.args.gan_alone:
-                generator_loss += generator_loss_dict["loss_dm"] * self.args.dm_loss_weight
+                # 根据 use_decoupled_dmd 选择正确的 loss key
+                if getattr(self.args, 'use_decoupled_dmd', False):
+                    # Decoupled DMD 模式：使用 loss_decoupled
+                    generator_loss += generator_loss_dict["loss_decoupled"] * self.args.dm_loss_weight
+                else:
+                    # 普通 DMD 模式：使用 loss_dm
+                    generator_loss += generator_loss_dict["loss_dm"] * self.args.dm_loss_weight
 
             if self.cls_on_clean_image and self.gen_cls_loss:
                 generator_loss += generator_loss_dict["gen_cls_loss"] * self.gen_cls_loss_weight
@@ -647,6 +662,41 @@ class Trainer:
                     "generator_grad_norm": generator_grad_norm.item(),
                     "guidance_grad_norm": guidance_grad_norm.item(),
                 })
+                
+                # 计算CLIP score（如果启用）
+                if self.compute_clip_score_in_training:
+                    try:
+                        # 获取当前batch的文本prompts
+                        # 注意：这里需要从log_dict或其他地方获取原始文本
+                        # 由于训练时使用的是tokenized的文本，我们需要解码回文本
+                        # 为了简化，这里使用一个固定的caption列表或者从dataloader获取
+                        
+                        # 将生成的图像转换为numpy格式 [B, H, W, C]
+                        # generated_image shape: [B, C, H, W], range: [-1, 1]
+                        images_for_clip = ((generated_image + 1.0) * 127.5).clamp(0, 255).to(torch.uint8)
+                        images_for_clip = images_for_clip.permute(0, 2, 3, 1).cpu().numpy()
+                        
+                        # 由于我们无法在训练时轻易获取原始文本，使用一个通用的描述
+                        # 实际使用时，可以考虑在dataloader中保存原始文本
+                        num_images = images_for_clip.shape[0]
+                        captions = ["a high quality image"] * num_images  # 通用caption
+                        
+                        # 计算CLIP score
+                        clip_score = compute_clip_score(
+                            images=list(images_for_clip),
+                            captions=captions,
+                            clip_model=self.clip_model_name,
+                            device=self.clip_score_device,
+                            how_many=num_images
+                        )
+                        
+                        data_dict["clip_score"] = float(clip_score)
+                        print(f"  [Step {self.step}] CLIP Score: {clip_score:.4f}")
+                        
+                    except Exception as e:
+                        print(f"  [Step {self.step}] CLIP Score computation failed: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
 
                 if self.denoising:
                     origianl_clean_image = log_dict["original_clean_image"]
@@ -784,13 +834,21 @@ def parse_args():
     parser.add_argument("--lora_dropout", type=float, default=0.0)
 
     # Decoupled DMD 参数
-    parser.add_argument("--cfg_weight", type=float, default=1.0, help="CFG augmentation weight for Decoupled DMD")
+    # parser.add_argument("--cfg_weight", type=float, default=1.0, help="CFG augmentation weight for Decoupled DMD")
     parser.add_argument("--use_decoupled_dmd", action="store_true", help="Use Decoupled DMD training")
     
     # f-散度参数
     parser.add_argument("--use_f_divergence", action="store_true", help="Use f-divergence weighting for distribution matching")
     parser.add_argument("--divergence_type", type=str, default="JS", choices=["JS", "forward-KL", "reverse-KL"], 
                         help="Type of f-divergence: JS (Jensen-Shannon), forward-KL, or reverse-KL")
+    
+    # CLIP score evaluation during training
+    parser.add_argument("--compute_clip_score_in_training", action="store_true",
+                        help="Compute CLIP score during visual steps (saves to wandb)")
+    parser.add_argument("--clip_score_device", type=str, default="cpu", choices=["cpu", "cuda"],
+                        help="Device for CLIP model (use cpu to save GPU memory)")
+    parser.add_argument("--clip_model", type=str, default="ViT-B/32", choices=["ViT-B/32", "ViT-G/14"],
+                        help="CLIP model to use for scoring")
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))

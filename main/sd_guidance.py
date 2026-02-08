@@ -193,7 +193,6 @@ class SDGuidance(nn.Module):
         f-散度权重
         Args:
             batch_size: 批次大小
-            timesteps: 时间步 [B]，用于时间片段归一化
             divergence_type: 散度类型 ("JS", "forward-KL", "reverse-KL")
         Returns:
             h_weight: 权重系数 [B, 1, 1, 1]
@@ -210,7 +209,7 @@ class SDGuidance(nn.Module):
         
         if divergence_type == "JS":
             # Jensen-Shannon: h(r) = r / (r + 1)
-            ratio_r = torch.sigmoid(logits)
+            h_weight = torch.sigmoid(logits)
         elif divergence_type == "forward-KL":
             # Forward KL: h(r) = r
             h_weight = ratio_r

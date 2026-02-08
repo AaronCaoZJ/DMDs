@@ -18,7 +18,7 @@ accelerate launch --config_file fsdp_configs/fsdp_1node_2x5090_mix.yaml main/tra
     --generator_lr 1e-5  \
     --guidance_lr 1e-5 \
     --train_iters 100000000 \
-    --output_path  $CHECKPOINT_PATH/sdv15_decoupled_dmd \
+    --output_path  $CHECKPOINT_PATH/sdv15_decoupled_dm_gan \
     --cache_dir $CHECKPOINT_PATH/cache \
     --log_path $CHECKPOINT_PATH/logs \
     --batch_size 4 \
@@ -27,7 +27,7 @@ accelerate launch --config_file fsdp_configs/fsdp_1node_2x5090_mix.yaml main/tra
     --resolution 512 \
     --latent_resolution 64 \
     --seed 10 \
-    --real_guidance_scale 7.5 \
+    --real_guidance_scale 1.75 \
     --fake_guidance_scale 1.0 \
     --max_grad_norm 10.0 \
     --model_id "stable-diffusion-v1-5/stable-diffusion-v1-5" \
@@ -35,7 +35,7 @@ accelerate launch --config_file fsdp_configs/fsdp_1node_2x5090_mix.yaml main/tra
     --real_image_path $CHECKPOINT_PATH/sd_vae_latents_laion_500k_lmdb \
     --wandb_iters 50 \
     --wandb_entity $WANDB_ENTITY \
-    --wandb_name "sdv15_ddmd_4step_lr1-5_cfg7.5_new"  \
+    --wandb_name "sdv15_ddmd_4step_1-5gid_1-5gen_1.75realgid"  \
     --wandb_project $WANDB_PROJECT \
     --use_fp16 \
     --log_loss \
@@ -46,7 +46,16 @@ accelerate launch --config_file fsdp_configs/fsdp_1node_2x5090_mix.yaml main/tra
     --denoising_timestep 1000 \
     --backward_simulation \
     --use_decoupled_dmd \
-    --min_step_percent 0.0 \
-    --max_step_percent 1.0 \
+    --cls_on_clean_image \
+    --gen_cls_loss \
+    --gen_cls_loss_weight 5e-3 \
+    --guidance_cls_loss_weight 1e-2 \
+    --diffusion_gan \
+    --diffusion_gan_max_timestep 1000 \
+    --denoising \
+    --num_denoising_step 4 \
+    --denoising_timestep 1000 \
+    # --use_f_divergence \
+    # --divergence_type "JS" \
 
 

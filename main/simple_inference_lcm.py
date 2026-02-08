@@ -1,8 +1,9 @@
 """
 简单的推理脚本，用于测试训练好的 SDv1.5 模型
 支持CLIP score和ImageReward评估
+使用LCMScheduler进行高效的few-step推理
 """
-from diffusers import UNet2DConditionModel, AutoencoderKL, DDPMScheduler
+from diffusers import UNet2DConditionModel, AutoencoderKL, LCMScheduler
 from transformers import CLIPTokenizer, CLIPTextModel
 from PIL import Image
 import torch
@@ -30,49 +31,22 @@ def load_generator(checkpoint_path):
     return generator
 
 
-def get_x0_from_noise(x_t, noise, alphas_cumprod, t):
-    """从噪声预测恢复x0"""
-    alpha_t = alphas_cumprod[t].reshape(-1, 1, 1, 1)
-    x0 = (x_t - (1 - alpha_t).sqrt() * noise) / alpha_t.sqrt()
-    return x0
-
-
 @torch.no_grad()
 def generate_images(generator, vae, text_encoder, tokenizer, prompts, args, noise_scheduler):
-    """生成图像 - 使用4步backward simulation
-    
-    这个实现与训练代码中的sample_backward方法保持完全一致：
-    1. 从纯噪声开始
-    2. 迭代4步，每步预测噪声并恢复x0
-    3. 在每步之间添加噪声到下一个时间步
-    4. 可选：每生成一张图就计算CLIP score
-    """
     generator.eval()
     all_images = []
     clip_scores = []
     
-    # 设置4步去噪的时间步（与训练配置完全一致）
-    # denoising_timestep = 1000, num_denoising_step = 4
-    # denoising_step_list = range(999, 0, -250) = [999, 749, 499, 249]
-    num_denoising_step = args.num_denoising_step  # 4
-    denoising_timestep = args.denoising_timestep  # 1000
-    timestep_interval = denoising_timestep // num_denoising_step  # 250
-    
-    denoising_step_list = list(range(denoising_timestep-1, 0, -timestep_interval))
-    print(f"使用4步推理，时间步列表: {denoising_step_list}")
-    print(f"时间步间隔: {timestep_interval}")
-    
-    # 获取alphas_cumprod用于正确的去噪计算
-    alphas_cumprod = noise_scheduler.alphas_cumprod.to(args.device)
+    # 固定timesteps
+    target_timesteps = [999, 749, 499, 249]
+    print(f"使用LCMScheduler，固定时间步: {target_timesteps}")
     
     for idx, prompt in enumerate(prompts):
         print(f"Generating image {idx+1}/{len(prompts)}: {prompt}")
         
-        # 为每张图片设置固定种子（基于全局种子 + 图片索引）
         torch.manual_seed(args.seed + idx)
         torch.cuda.manual_seed(args.seed + idx)
         
-        # 编码文本
         text_inputs = tokenizer(
             prompt,
             padding="max_length",
@@ -83,70 +57,52 @@ def generate_images(generator, vae, text_encoder, tokenizer, prompts, args, nois
         text_input_ids = text_inputs.input_ids.to(args.device)
         text_embedding = text_encoder(text_input_ids)[0]
         
-        # 生成初始随机噪声（从t=999开始）
-        noisy_image = torch.randn(
+        # 生成初始随机噪声
+        latents = torch.randn(
             1, 4, args.latent_resolution, args.latent_resolution,
-            dtype=torch.float32,
+            dtype=generator.dtype,  # 跟随模型精度
             device=args.device
         )
         
-        # 4步迭代去噪过程（与训练时的sample_backward完全一致）
-        # 遍历所有4个时间步: [999, 749, 499, 249]
-        for step_idx, timestep_value in enumerate(denoising_step_list):
-            current_timesteps = torch.ones(1, device=args.device, dtype=torch.long) * timestep_value
+        # ⚠️ 关键：为每张图重新设置scheduler状态
+        # LCMScheduler有内部状态，必须在每次生成前重置
+        noise_scheduler.set_timesteps(num_inference_steps=4)
+        noise_scheduler.timesteps = torch.tensor(target_timesteps, device=args.device, dtype=torch.long)
+        
+        # 4步去噪过程
+        for t in noise_scheduler.timesteps:
+            # 扩展 latents 输入 (LCM 不需要 scale_model_input，但标准流程通常会加)
+            # latents_input = noise_scheduler.scale_model_input(latents, t) 
+            # 对于纯 LCM scheduler 通常 latents_input = latents，这行可以省略
             
-            # 使用生成器预测噪声（epsilon prediction）
-            predicted_noise = generator(
-                noisy_image, current_timesteps, text_embedding
+            noise_pred = generator(
+                latents, t, text_embedding
             ).sample
             
-            # 从噪声预测中恢复x0（干净图像）
-            # 使用与训练代码相同的get_x0_from_noise函数
-            generated_image = get_x0_from_noise(
-                noisy_image, predicted_noise.double(), alphas_cumprod.double(), current_timesteps
-            ).float()
-            
-            # 如果不是最后一步，添加噪声到下一个时间步
-            if step_idx < len(denoising_step_list) - 1:
-                # 计算下一个时间步：当前时间步 - 间隔
-                # 999 -> 749, 749 -> 499, 499 -> 249
-                next_timestep = current_timesteps - timestep_interval
-                
-                # 使用noise_scheduler添加噪声（与训练代码一致）
-                # 这会根据noise schedule添加适当水平的噪声
-                noisy_image = noise_scheduler.add_noise(
-                    generated_image, 
-                    torch.randn_like(generated_image), 
-                    next_timestep
-                ).to(noisy_image.dtype)
-            else:
-                # 最后一步（t=249），直接使用生成的干净图像
-                noisy_image = generated_image
+            latents = noise_scheduler.step(
+                noise_pred, 
+                t, 
+                latents,
+                return_dict=False
+            )[0]
         
-        # 最终的noisy_image就是生成的干净latent
-        # 解码latents到图像空间
-        generated_latents = noisy_image / vae.config.scaling_factor  # 使用VAE的scaling_factor
-        images = vae.decode(generated_latents).sample
+        # 解码
+        latents = latents / vae.config.scaling_factor
+        images = vae.decode(latents).sample
         
-        # 转换到[0, 255]
         images = ((images + 1.0) * 127.5).clamp(0, 255).to(torch.uint8)
         images = images.permute(0, 2, 3, 1).cpu().numpy()
         
-        # 转换为PIL图像
         pil_image = Image.fromarray(images[0])
         all_images.append(pil_image)
         
         # 如果启用了CLIP评分，立即计算这张图的分数
         if args.compute_clip_score:
             try:
-                # 将PIL图像转换为numpy数组（单张图的列表）
-                # image_np = np.array(pil_image)
                 image_np = images[0]
-                
-                # 使用coco_evaluator中的compute_clip_score函数
                 clip_score = compute_clip_score(
-                    images=[image_np],  # 单张图的列表
-                    captions=[prompt],  # 单个prompt的列表
+                    images=[image_np],
+                    captions=[prompt],
                     clip_model=args.clip_model,
                     device=args.device,
                     how_many=1  # 只计算1张图
@@ -195,7 +151,7 @@ def save_images(images, prompts, output_dir, metrics=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Simple inference for trained SDv1.5 model with 4-step backward simulation")
+    parser = argparse.ArgumentParser(description="Simple inference for trained SDv1.5 model with LCMScheduler")
     parser.add_argument("--checkpoint", type=str, required=True, 
                         help="Path to checkpoint (pytorch_model.bin)")
     parser.add_argument("--output_dir", type=str, default="./inference_outputs",
@@ -216,11 +172,6 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--print_model", action="store_true",
                         help="Whether to print model structure and parameter counts")
-    # 4步推理的关键参数（与训练配置一致）
-    parser.add_argument("--num_denoising_step", type=int, default=4,
-                        help="Number of denoising steps (default: 4)")
-    parser.add_argument("--denoising_timestep", type=int, default=1000,
-                        help="Total timesteps for denoising (default: 1000)")
     
     # 评估指标参数
     parser.add_argument("--compute_clip_score", action="store_true",
@@ -236,15 +187,13 @@ def main():
     torch.cuda.manual_seed_all(args.seed)
     
     print("=" * 80)
-    print("Simple Inference for SDv1.5 - 4-Step Backward Simulation")
+    print("Simple Inference for SDv1.5 - LCMScheduler (4-Step)")
     print("=" * 80)
     print(f"Checkpoint: {args.checkpoint}")
     print(f"Device: {args.device}")
     print(f"Number of images: {len(args.prompts)}")
     print(f"Random seed: {args.seed}")
-    print(f"Denoising steps: {args.num_denoising_step}")
-    print(f"Denoising timestep: {args.denoising_timestep}")
-    print(f"Timestep interval: {args.denoising_timestep // args.num_denoising_step}")
+    print(f"Using LCMScheduler with fixed timesteps: [999, 749, 499, 249]")
     print("=" * 80)
     
     # 加载模型组件
@@ -289,8 +238,8 @@ def main():
         args.model_id, subfolder="tokenizer"
     )
 
-    # 加载 noise scheduler
-    noise_scheduler = DDPMScheduler.from_pretrained(
+    # 加载 LCM scheduler (官方推荐)
+    noise_scheduler = LCMScheduler.from_pretrained(
         args.model_id, subfolder="scheduler"
     )
 
