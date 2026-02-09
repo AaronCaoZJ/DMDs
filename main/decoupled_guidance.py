@@ -62,12 +62,12 @@ class SDDecoupledGuidance(SDGuidance):
             dm_noisy_latents = self.scheduler.add_noise(latents, torch.randn_like(latents), dm_timesteps)
 
             # DM fake cond
-            pred_dm_fake_cond_noise = predict_noise(
+            pred_dm_fake_cond_noise, _ = predict_noise(
                 self.fake_unet, dm_noisy_latents, text_embedding, uncond_embedding, 
                 dm_timesteps, guidance_scale=self.fake_guidance_scale,
                 unet_added_conditions=unet_added_conditions,
                 uncond_unet_added_conditions=uncond_unet_added_conditions,
-                decoupled=False
+                decoupled=True
             )
             pred_dm_fake_cond_image = get_x0_from_noise(
                 dm_noisy_latents.double(), pred_dm_fake_cond_noise.double(), self.alphas_cumprod.double(), dm_timesteps
