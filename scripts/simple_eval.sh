@@ -2,12 +2,12 @@
 
 # 简单推理脚本 - 使用训练好的SD1.5模型进行4步推理
 
-cd /home/zhijun/Code/DMD2
+cd /home/zhijun/Code/DMDs
 
-export PYTHONPATH=/home/zhijun/Code/DMD2:$PYTHONPATH
-export HF_HOME=/home/zhijun/Code/DMD2/ckpt
-export HF_HUB_CACHE=/home/zhijun/Code/DMD2/ckpt/hub
-export TRANSFORMERS_CACHE=/home/zhijun/Code/DMD2/ckpt/transformers
+export PYTHONPATH=/home/zhijun/Code/DMDs:$PYTHONPATH
+export HF_HOME=/home/zhijun/Code/DMDs/ckpt
+export HF_HUB_CACHE=/home/zhijun/Code/DMDs/ckpt/hub
+export TRANSFORMERS_CACHE=/home/zhijun/Code/DMDs/ckpt/transformers
 
 # 设置checkpoint路径
 CHECKPOINT_DIR="/data/sdv15/cache/time_1770521735_seed10/checkpoint_model_002000"
@@ -22,7 +22,6 @@ fi
 
 echo "Using checkpoint: $LATEST_CHECKPOINT"
 
-# 运行推理 - 使用4步backward simulation
 python main/simple_inference_lcm.py \
     --checkpoint "$LATEST_CHECKPOINT" \
     --output_dir "/data/sdv15/test_output/lr1-5_ratio5_cfg3.0/dmd2_gan/dmd2_2000_newprompt" \

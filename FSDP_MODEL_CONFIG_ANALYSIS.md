@@ -1,4 +1,4 @@
-# DMD2 项目 FSDP 与模型配置详细分析
+# DMDs 项目 FSDP 与模型配置详细分析
 
 ## 一、FSDP 核心配置
 
@@ -65,7 +65,7 @@ if args.initialize_generator:
 
 **完整路径**: 
 - HuggingFace Hub: `stable-diffusion-v1-5/stable-diffusion-v1-5/unet`
-- 本地缓存: `/home/zhijun/Code/DMD2/ckpt/hub/models--stable-diffusion-v1-5--stable-diffusion-v1-5/snapshots/.../unet/`
+- 本地缓存: `/home/zhijun/Code/DMDs/ckpt/hub/models--stable-diffusion-v1-5--stable-diffusion-v1-5/snapshots/.../unet/`
 
 #### 2.1.2 冻结状态
 ```python
@@ -210,7 +210,7 @@ self.text_encoder.requires_grad_(False)  # ✅ 冻结
 
 **路径**: 
 - HuggingFace Hub: `stable-diffusion-v1-5/stable-diffusion-v1-5/text_encoder`
-- 本地缓存: `/home/zhijun/Code/DMD2/ckpt/hub/models--stable-diffusion-v1-5--stable-diffusion-v1-5/snapshots/.../text_encoder/`
+- 本地缓存: `/home/zhijun/Code/DMDs/ckpt/hub/models--stable-diffusion-v1-5--stable-diffusion-v1-5/snapshots/.../text_encoder/`
 
 **精度**: 保持原始精度（FP32），未转换为 BF16
 
@@ -239,7 +239,7 @@ if self.use_fp16 and self.not_sdxl_vae:
 
 **路径**: 
 - HuggingFace Hub: `stable-diffusion-v1-5/stable-diffusion-v1-5/vae`
-- 本地缓存: `/home/zhijun/Code/DMD2/ckpt/hub/models--stable-diffusion-v1-5--stable-diffusion-v1-5/snapshots/.../vae/`
+- 本地缓存: `/home/zhijun/Code/DMDs/ckpt/hub/models--stable-diffusion-v1-5--stable-diffusion-v1-5/snapshots/.../vae/`
 
 **精度**:
 - SDv1.5: FP16 (因为 `use_fp16=True` 且 `not_sdxl_vae=True`)

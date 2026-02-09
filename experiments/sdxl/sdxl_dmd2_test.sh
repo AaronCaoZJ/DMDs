@@ -1,18 +1,18 @@
 #!/bin/bash
 
 # Change to project directory
-cd /home/zhijun/Code/DMD2
+cd /home/zhijun/Code/DMDs
 
 # Set environment variables
 export CHECKPOINT_PATH=/data/sdxl
 export WANDB_ENTITY=aaroncaozj_team
-export WANDB_PROJECT=sdxl_dmd2_test
-export PYTHONPATH=/home/zhijun/Code/DMD2:$PYTHONPATH
+export WANDB_PROJECT=sdxl_DMDs_test
+export PYTHONPATH=/home/zhijun/Code/DMDs:$PYTHONPATH
 
 # HuggingFace model cache location
-export HF_HOME=/home/zhijun/Code/DMD2/ckpt
-export HF_HUB_CACHE=/home/zhijun/Code/DMD2/ckpt/hub
-export TRANSFORMERS_CACHE=/home/zhijun/Code/DMD2/ckpt/transformers
+export HF_HOME=/home/zhijun/Code/DMDs/ckpt
+export HF_HUB_CACHE=/home/zhijun/Code/DMDs/ckpt/hub
+export TRANSFORMERS_CACHE=/home/zhijun/Code/DMDs/ckpt/transformers
 
 # 2-GPU configuration (5090 + 5090D)
 accelerate launch --config_file fsdp_configs/fsdp_1node_2x5090.yaml main/train_sd.py  \

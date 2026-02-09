@@ -1,18 +1,18 @@
 #!/bin/bash
 
 # Change to project directory
-cd /home/zhijun/Code/DMD2
+cd /home/zhijun/Code/DMDs
 
 # Set environment variables
 export CHECKPOINT_PATH=/data/sdv15
 export WANDB_ENTITY=aaroncaozj_team
 export WANDB_PROJECT=sdv15_decoupled_dmd
-export PYTHONPATH=/home/zhijun/Code/DMD2:$PYTHONPATH
+export PYTHONPATH=/home/zhijun/Code/DMDs:$PYTHONPATH
 
 # HuggingFace model cache location
-export HF_HOME=/home/zhijun/Code/DMD2/ckpt
-export HF_HUB_CACHE=/home/zhijun/Code/DMD2/ckpt/hub
-export TRANSFORMERS_CACHE=/home/zhijun/Code/DMD2/ckpt/transformers
+export HF_HOME=/home/zhijun/Code/DMDs/ckpt
+export HF_HUB_CACHE=/home/zhijun/Code/DMDs/ckpt/hub
+export TRANSFORMERS_CACHE=/home/zhijun/Code/DMDs/ckpt/transformers
 
 CKPT_PATH="/data/sdv15/sdv15_decoupled_dmd/time_1769919538_seed10/checkpoint_model_002000"
 

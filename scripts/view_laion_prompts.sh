@@ -22,12 +22,12 @@ if [ ! -f "$CHECKPOINT_PATH/captions_laion_score6.25.pkl" ]; then
 fi
 
 # 显示前20个提示词
-python /home/zhijun/Code/DMD2/main/view_prompts.py \
+python /home/zhijun/Code/DMDs/main/view_prompts.py \
     --pkl_path $CHECKPOINT_PATH/captions_laion_score6.25.pkl \
     --num_samples 20
 
 echo ""
 echo "=========================================="
 echo "如果要查看随机样本，使用："
-echo "  python /home/zhijun/Code/DMD2/main/view_prompts.py --pkl_path $CHECKPOINT_PATH/captions_laion_score6.25.pkl --num_samples 50 --random"
+echo "  python /home/zhijun/Code/DMDs/main/view_prompts.py --pkl_path $CHECKPOINT_PATH/captions_laion_score6.25.pkl --num_samples 50 --random"
 echo "=========================================="

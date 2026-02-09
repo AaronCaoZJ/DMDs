@@ -2,12 +2,12 @@
 
 # 使用原始SD1.5 teacher模型进行标准采样推理
 
-cd /home/zhijun/Code/DMD2
+cd /home/zhijun/Code/DMDs
 
-export PYTHONPATH=/home/zhijun/Code/DMD2:$PYTHONPATH
-export HF_HOME=/home/zhijun/Code/DMD2/ckpt
-export HF_HUB_CACHE=/home/zhijun/Code/DMD2/ckpt/hub
-export TRANSFORMERS_CACHE=/home/zhijun/Code/DMD2/ckpt/transformers
+export PYTHONPATH=/home/zhijun/Code/DMDs:$PYTHONPATH
+export HF_HOME=/home/zhijun/Code/DMDs/ckpt
+export HF_HUB_CACHE=/home/zhijun/Code/DMDs/ckpt/hub
+export TRANSFORMERS_CACHE=/home/zhijun/Code/DMDs/ckpt/transformers
 
 # 运行teacher模型推理
 python main/simple_inference_teacher.py \
