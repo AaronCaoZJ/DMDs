@@ -19,7 +19,7 @@ python setup.py  develop
 ```
 
 ## 🚀 Inference Example
-Details in [README-og.md/Inference Example](Code/DMDs/README-og.md)
+Details in [README-og.md/Inference Example](README-og.md)
 
 ## 🛁 Distillation Training and Evaluation
 
